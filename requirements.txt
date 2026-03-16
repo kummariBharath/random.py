@@ -1,7 +1,1 @@
-streamlit
-pandas
-plotly
-openai
-pandasai
-python-dotenv
-matplotlib
+# No third-party packages are required for the current CLI tool.

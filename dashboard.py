@@ -1,181 +1,150 @@
-import streamlit as st
-import pandas as pd
-from pandasai import PandasAI
-from pandasai.llm.openai import OpenAI
+import argparse
+import csv
+import math
 import os
-import time
-from dotenv import load_dotenv
-import matplotlib.pyplot as plt
-import plotly.express as px
+import statistics
+from collections import Counter
 
-# Load environment variables
-load_dotenv()
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="AI Data Analyst",
-    page_icon="📊",
-    layout="wide"
-)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Inspect a CSV file and print a compact data quality report."
+    )
+    parser.add_argument("csv_file", help="Path to the CSV file to analyze.")
+    parser.add_argument(
+        "--preview-rows",
+        type=int,
+        default=5,
+        help="Number of rows to show in the preview section.",
+    )
+    parser.add_argument(
+        "--top-values",
+        type=int,
+        default=5,
+        help="Number of common values to show for categorical columns.",
+    )
+    return parser.parse_args()
 
-# --- Header ---
-st.title("📊 AI Data Analyst Agent")
-st.markdown("""
-Upload a CSV file and ask questions about your data!
-*Powered by OpenAI and PandasAI (Legacy Mode)*
-""")
 
-# --- Sidebar ---
-with st.sidebar:
-    st.header("Configuration")
-    
-    # Try to get key from env, otherwise ask user
-    env_key = os.getenv("OPENAI_API_KEY")
-    api_key = st.text_input("OpenAI API Key", value=env_key if env_key else "", type="password")
-    
-    if not api_key:
-        st.warning("⚠️ Please provide an API Key to proceed.")
-        
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+def is_missing(value: str) -> bool:
+    return value is None or value.strip() == ""
 
-# --- Main Logic ---
-import random
 
-# --- Mock AI Class for Demo Mode ---
-class MockPandasAI:
-    def run(self, df, prompt=""):
-        time.sleep(1) # Simulate thinking
-        prompt = prompt.lower()
-        if "plot" in prompt or "chart" in prompt or "trend" in prompt:
-            # Generate a random plot (using matplotlib directly for demo)
-            plt.figure(figsize=(10, 5))
-            # Try to plot numeric columns
-            numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
-            if len(numeric_cols) > 0:
-                col = numeric_cols[0]
-                plt.bar(df.head(10).index, df.head(10)[col])
-                plt.title(f"Demo Chart: {col} (Mock Intepretation)")
-                plt.xlabel("Index")
-                plt.ylabel(col)
-            else:
-                plt.text(0.5, 0.5, "No numeric data to plot", ha='center')
-            return "Here is a visualization based on your request (Demo Mode)."
-        elif "recommendation" in prompt or "insight" in prompt:
-            return """
-            **Mock Insights (Demo Mode):**
-            1.  **Trend Observed:** Sales show a positive correlation with time.
-            2.  **Action Item:** Invest in region 'North' as it shows high potential.
-            3.  **Data Quality:** The dataset appears clean with no missing values.
-            """
-        else:
-            return f"I processed your request: '{prompt}'. \n\n(This is a demo response. Add a valid API Key to get real AI analysis.)"
-
-import plotly.express as px
-
-# --- Main Logic ---
-if uploaded_file is not None:
+def try_float(value: str) -> float | None:
     try:
-        df = pd.read_csv(uploaded_file)
-        st.write("### Data Preview")
-        st.dataframe(df.head())
-        
-        # Determine Mode
-        ai_enabled = bool(api_key)
-        
-        # Tabs for different features
-        tab1, tab2 = st.tabs(["📈 Manual Visualization", "🤖 AI Analyst"])
-        
-        # --- TAB 1: Manual Visualization (Works without API Key) ---
-        with tab1:
-            st.subheader("Build you own charts")
-            st.info("Select columns to visualize them manually.")
-            
-            # Column selection
-            numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
-            all_cols = df.columns.tolist()
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                chart_type = st.selectbox("Chart Type", ["Bar", "Line", "Scatter", "Histogram", "Box"])
-            with col2:
-                x_col = st.selectbox("X Axis", all_cols)
-            with col3:
-                if chart_type in ["Histogram", "Box"]:
-                    y_col = None
-                else:
-                    y_col = st.selectbox("Y Axis", numeric_cols if numeric_cols else all_cols)
-            
-            if st.button("Generate Chart"):
-                if chart_type == "Bar":
-                    fig = px.bar(df, x=x_col, y=y_col, title=f"{x_col} vs {y_col}")
-                elif chart_type == "Line":
-                    fig = px.line(df, x=x_col, y=y_col, title=f"{x_col} vs {y_col}")
-                elif chart_type == "Scatter":
-                    fig = px.scatter(df, x=x_col, y=y_col, title=f"{x_col} vs {y_col}")
-                elif chart_type == "Histogram":
-                    fig = px.histogram(df, x=x_col, title=f"Distribution of {x_col}")
-                elif chart_type == "Box":
-                    fig = px.box(df, x=x_col, title=f"Box Plot of {x_col}")
-                
-                st.plotly_chart(fig, use_container_width=True)
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-        # --- TAB 2: AI Analyst (Requires API Key or runs in Mock Mode) ---
-        with tab2:
-            st.subheader("Ask the AI")
-            
-            if not ai_enabled:
-                 st.warning("⚠️ No Valid API Key detected. Using **Demo Mode** (Mock Responses).")
-                 agent = MockPandasAI()
-                 mode_label = "Demo Mode"
-            else:
-                 st.success("✅ AI Online. Using OpenAI.")
-                 llm = OpenAI(api_token=api_key)
-                 agent = PandasAI(llm, enable_cache=False)
-                 mode_label = "Real AI"
 
-            query = st.text_area("What would you like to know?", placeholder="e.g., Plot sales by region")
-            
-            if st.button("Generate Answer"):
-                if query:
-                    with st.spinner(f"Thinking ({mode_label})..."):
-                        try:
-                            response = agent.run(df, prompt=query)
-                            st.write(response)
-                            if plt.get_fignums():
-                                st.pyplot(plt.gcf())
-                                plt.clf()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-            
-            st.markdown("---")
-            if st.button("Get Business Insights"):
-                 with st.spinner(f"Analyzing ({mode_label})..."):
-                    try:
-                        if ai_enabled:
-                             prompt = "Analyze this dataset and provide 3 key insights and recommendations."
-                             response = agent.run(df, prompt=prompt)
-                        else:
-                            response = agent.run(df, prompt="insight")
-                        st.write(response)
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+def load_csv(path: str) -> tuple[list[str], list[dict[str, str]]]:
+    with open(path, "r", newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError("CSV file does not contain a header row.")
+        rows = list(reader)
+        return reader.fieldnames, rows
 
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
 
-elif uploaded_file is None:
-    st.info("👆 Please upload a CSV file to begin.")
-    
-    if st.button("Use Sample Data"):
-        # Create a sample CSV for the user to download/use
-        data = {
-            'Date': pd.date_range(start='1/1/2023', periods=10),
-            'Product': ['Widget A', 'Widget B', 'Widget C', 'Widget A', 'Widget B', 'Widget C', 'Widget A', 'Widget B', 'Widget C', 'Widget A'],
-            'Sales': [100, 150, 80, 120, 160, 90, 110, 140, 85, 130],
-            'Region': ['North', 'North', 'South', 'South', 'East', 'East', 'West', 'West', 'North', 'South']
+def profile_column(
+    rows: list[dict[str, str]], column: str, top_values: int
+) -> dict[str, object]:
+    values = [row.get(column, "") for row in rows]
+    non_missing = [value for value in values if not is_missing(value)]
+    missing_count = len(values) - len(non_missing)
+
+    numeric_values: list[float] = []
+    numeric_like = True
+    for value in non_missing:
+        parsed = try_float(value)
+        if parsed is None:
+            numeric_like = False
+            break
+        numeric_values.append(parsed)
+
+    if non_missing and numeric_like:
+        return {
+            "type": "numeric",
+            "missing": missing_count,
+            "distinct": len(set(non_missing)),
+            "min": min(numeric_values),
+            "max": max(numeric_values),
+            "mean": statistics.fmean(numeric_values),
+            "median": statistics.median(numeric_values),
         }
-        df_sample = pd.DataFrame(data)
-        df_sample.to_csv("sample_sales.csv", index=False)
-        st.success("Created 'sample_sales.csv'! Drag and drop it into the uploader.")
-        st.dataframe(df_sample)
 
+    counts = Counter(non_missing)
+    return {
+        "type": "categorical",
+        "missing": missing_count,
+        "distinct": len(counts),
+        "top": counts.most_common(top_values),
+    }
+
+
+def format_number(value: float) -> str:
+    if math.isfinite(value) and value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}"
+
+
+def print_preview(fieldnames: list[str], rows: list[dict[str, str]], preview_rows: int) -> None:
+    print("Preview")
+    print("-" * 72)
+    print(" | ".join(fieldnames))
+    for row in rows[:preview_rows]:
+        print(" | ".join(str(row.get(name, "")) for name in fieldnames))
+    print()
+
+
+def print_summary(fieldnames: list[str], rows: list[dict[str, str]], top_values: int) -> None:
+    print("Summary")
+    print("-" * 72)
+    print(f"Rows: {len(rows)}")
+    print(f"Columns: {len(fieldnames)}")
+    print()
+
+    for column in fieldnames:
+        profile = profile_column(rows, column, top_values)
+        print(f"{column} [{profile['type']}]")
+        print(f"  missing: {profile['missing']}")
+        print(f"  distinct: {profile['distinct']}")
+        if profile["type"] == "numeric":
+            print(f"  min: {format_number(profile['min'])}")
+            print(f"  max: {format_number(profile['max'])}")
+            print(f"  mean: {format_number(profile['mean'])}")
+            print(f"  median: {format_number(profile['median'])}")
+        else:
+            top = profile["top"]
+            if top:
+                print("  common values:")
+                for value, count in top:
+                    print(f"    {value}: {count}")
+            else:
+                print("  common values: none")
+        print()
+
+
+def main() -> int:
+    args = parse_args()
+    path = args.csv_file
+
+    if not os.path.exists(path):
+        print(f"File not found: {path}")
+        return 1
+
+    try:
+        fieldnames, rows = load_csv(path)
+    except Exception as exc:
+        print(f"Failed to read CSV: {exc}")
+        return 1
+
+    print(f"CSV Analyzer Report: {os.path.basename(path)}")
+    print("=" * 72)
+    print_preview(fieldnames, rows, args.preview_rows)
+    print_summary(fieldnames, rows, args.top_values)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
