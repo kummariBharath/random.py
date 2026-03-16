@@ -38,12 +38,26 @@ def try_float(value: str) -> float | None:
 
 
 def load_csv(path: str) -> tuple[list[str], list[dict[str, str]]]:
-    with open(path, "r", newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        if not reader.fieldnames:
-            raise ValueError("CSV file does not contain a header row.")
-        rows = list(reader)
-        return reader.fieldnames, rows
+    encodings = ["utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "cp1252", "latin-1"]
+    last_error: Exception | None = None
+
+    for encoding in encodings:
+        try:
+            with open(path, "r", newline="", encoding=encoding) as handle:
+                reader = csv.DictReader(handle)
+                if not reader.fieldnames:
+                    raise ValueError("CSV file does not contain a header row.")
+                rows = list(reader)
+                return reader.fieldnames, rows
+        except UnicodeError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise ValueError(
+            "Could not decode the CSV file. Tried: " + ", ".join(encodings)
+        ) from last_error
+
+    raise ValueError("CSV file could not be read.")
 
 
 def profile_column(
